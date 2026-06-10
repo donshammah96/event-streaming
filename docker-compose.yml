@@ -1,0 +1,26 @@
+
+services:
+  nats:
+    image: nats:latest
+    container_name: event-streaming-nats
+    ports:
+      - "4422:4222"
+      - "8222:8222"
+    command: "-js -m 8222"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: event-streaming-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: event_streaming
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
