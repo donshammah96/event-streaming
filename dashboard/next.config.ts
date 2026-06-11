@@ -8,9 +8,9 @@ const requiredServerEnvVars = [
   "SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
 
-// Skip validation in CI test environments where NATS may not be fully configured
+// Skip validation in CI test environments where secrets are not populated
 if (
-  process.env.NODE_ENV === "production" ||
+  (process.env.NODE_ENV === "production" && process.env.CI !== "true") ||
   process.env.VALIDATE_ENV === "true"
 ) {
   for (const key of requiredServerEnvVars) {
