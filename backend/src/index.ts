@@ -3,8 +3,9 @@ import express from "express";
 import cors from "cors";
 import { WebSocketServer, WebSocket } from "ws";
 import dotenv from "dotenv";
+import Ajv from "ajv"; // top-level static import (was dynamic require in routes.ts)
 import { router } from "./routes";
-import { initNats, listStreams } from "./nats";
+import { initNats, getNatsConnection, listStreams } from "./nats";
 import { reloadSchemaCache } from "./schema";
 import { initializeSimulators, simulatorEvents } from "./services/simulator";
 import { prisma } from "./database";
@@ -15,8 +16,9 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Middlewares
-app.use(cors());
+// CORS — restrict to configured origin in production
+const corsOrigin = process.env.CORS_ORIGIN ?? "*";
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 
 // API Routes
@@ -35,6 +37,22 @@ server.on("upgrade", (request, socket, head) => {
   });
 });
 
+/** Typed broadcast payload discriminated union */
+type BroadcastPayload =
+  | { type: "SYSTEM"; message: string }
+  | { type: "LOG"; data: Record<string, unknown> }
+  | { type: "METRICS"; data: Record<string, unknown> }
+  | {
+      type: "STATS";
+      data: {
+        streams: { name: string; subjects: string[] }[];
+        activeSimulators: number;
+        pendingDlq: number;
+        registeredSchemas: number;
+        timestamp: string;
+      };
+    };
+
 const clients = new Set<WebSocket>();
 
 wss.on("connection", (ws) => {
@@ -42,74 +60,71 @@ wss.on("connection", (ws) => {
   console.log(`WebSocket client connected. Total clients: ${clients.size}`);
 
   // Send an initial greeting
-  ws.send(JSON.stringify({
-    type: "SYSTEM",
-    message: "Connected to Event Streaming Platform WebSocket Gateway"
-  }));
+  ws.send(
+    JSON.stringify({
+      type: "SYSTEM",
+      message: "Connected to Event Streaming Platform WebSocket Gateway",
+    } satisfies BroadcastPayload),
+  );
 
   ws.on("close", () => {
     clients.delete(ws);
     console.log(`WebSocket client disconnected. Total clients: ${clients.size}`);
   });
-  
+
   ws.on("error", (err) => {
     console.error("WebSocket client error:", err);
   });
 });
 
-// Broadcast helper
-function broadcast(payload: any) {
+// Broadcast helper — strongly typed
+function broadcast(payload: BroadcastPayload): void {
   const message = JSON.stringify(payload);
-  clients.forEach((client) => {
+  for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(message);
     }
-  });
+  }
 }
 
 // Forward events from Simulator emitter to WebSockets
-simulatorEvents.on("log", (logData) => {
-  broadcast({
-    type: "LOG",
-    data: logData
-  });
+simulatorEvents.on("log", (logData: Record<string, unknown>) => {
+  broadcast({ type: "LOG", data: logData });
 });
 
-simulatorEvents.on("metrics", (metricsData) => {
-  broadcast({
-    type: "METRICS",
-    data: metricsData
-  });
+simulatorEvents.on("metrics", (metricsData: Record<string, unknown>) => {
+  broadcast({ type: "METRICS", data: metricsData });
 });
 
 // Setup interval to poll and broadcast NATS/DB statistics in real time
 let statsInterval: NodeJS.Timeout;
 
-async function startStatsPolling() {
+async function startStatsPolling(): Promise<void> {
   statsInterval = setInterval(async () => {
     if (clients.size === 0) return; // Skip polling if no active UI listeners
-    
+
     try {
       // 1. Get streams statistics from NATS
-      let streamsData: any[] = [];
+      let streamsData: { name: string; subjects: string[] }[] = [];
       try {
         const streams = await listStreams();
-        streamsData = streams.map(s => ({
+        streamsData = streams.map((s) => ({
           name: s.name,
           subjects: s.subjects,
         }));
-      } catch (natsErr) {
+      } catch {
         // Suppress logs to avoid noise
       }
 
       // 2. Count active simulator consumers
-      const activeSimulatorsCount = await prisma.consumerSimulatorConfig.count({
-        where: { active: true }
-      });
+      const activeSimulatorsCount =
+        await prisma.consumerSimulatorConfig.count({
+          where: { active: true },
+        });
 
       // 3. Count pending DLQ events
       const pendingDlqCount = await prisma.dlqEvent.count({
-        where: { status: "PENDING" }
+        where: { status: "PENDING" },
       });
 
       // 4. Count total schemas registered
@@ -122,8 +137,8 @@ async function startStatsPolling() {
           activeSimulators: activeSimulatorsCount,
           pendingDlq: pendingDlqCount,
           registeredSchemas: schemaCount,
-          timestamp: new Date().toISOString()
-        }
+          timestamp: new Date().toISOString(),
+        },
       });
     } catch (err) {
       console.warn("Stats polling error:", err);
@@ -132,7 +147,7 @@ async function startStatsPolling() {
 }
 
 // Bootstrap execution
-async function bootstrap() {
+async function bootstrap(): Promise<void> {
   try {
     // 1. Connect to NATS JetStream
     await initNats();
@@ -148,7 +163,9 @@ async function bootstrap() {
 
     // 5. Listen
     server.listen(port, () => {
-      console.log(`Express Backend Server is running at http://localhost:${port}`);
+      console.log(
+        `Express Backend Server is running at http://localhost:${port}`,
+      );
       console.log(`WebSocket Server is listening on ws://localhost:${port}`);
     });
   } catch (err) {
@@ -157,12 +174,42 @@ async function bootstrap() {
   }
 }
 
-// Handle graceful shutdown
-process.on("SIGTERM", async () => {
-  console.log("Shutting down gracefully...");
+// ── Graceful shutdown ─────────────────────────────────────────────────────────
+async function shutdown(signal: string): Promise<void> {
+  console.log(`\n[${signal}] Shutting down gracefully...`);
+
+  // 1. Stop stat polling to prevent DB calls after disconnect
   clearInterval(statsInterval);
+
+  // 2. Close all WebSocket connections cleanly
+  for (const client of clients) {
+    client.terminate();
+  }
+  wss.close((err) => {
+    if (err) console.error("WSS close error:", err);
+  });
+
+  // 3. Close the HTTP server
+  server.close();
+
+  // 4. Disconnect from NATS
+  try {
+    const nc = getNatsConnection();
+    await nc.drain();
+  } catch {
+    // NATS may not have been initialized — skip drain gracefully
+  }
+
+  // 5. Disconnect Prisma
   await prisma.$disconnect();
+
   process.exit(0);
-});
+}
+
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT")); // handle Ctrl+C in local dev
+
+// Export Ajv at module level to confirm static import works (used in routes.ts)
+export { Ajv };
 
 bootstrap();

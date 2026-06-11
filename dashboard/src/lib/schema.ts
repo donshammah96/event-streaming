@@ -1,6 +1,7 @@
 import Ajv, { ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
-import { supabase } from "./supabaseClient";
+
+import { supabaseServer } from "./supabaseClient";
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 addFormats(ajv);
@@ -35,7 +36,7 @@ function wildcardToRegex(pattern: string): RegExp {
 // Reload and compile schemas from Supabase
 export async function reloadSchemaCache() {
   try {
-    const { data: dbSchemas, error } = await supabase
+    const { data: dbSchemas, error } = await supabaseServer
       .from("Schema")
       .select("*");
 
@@ -87,6 +88,7 @@ export async function reloadSchemaCache() {
 
     schemaCache = newCache;
     cacheLoaded = true;
+    /* eslint-disable-next-line no-console */
     console.log(
       `Loaded and compiled ${schemaCache.length} validation schema(s) from Supabase`,
     );
@@ -145,5 +147,5 @@ export function validateMessage(
 
 // Validate that a schema definition compiles successfully under Ajv settings
 export function validateSchemaDefinition(schema: unknown): void {
-  ajv.compile(schema as any);
+  ajv.compile(schema as Record<string, unknown>);
 }

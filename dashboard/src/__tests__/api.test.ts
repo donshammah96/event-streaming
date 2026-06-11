@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import fs from "fs";
 import path from "path";
 
@@ -11,7 +12,7 @@ try {
       if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
         const [key, ...values] = trimmed.split("=");
         const value = values.join("=");
-        process.env[key.trim()] = value.trim();
+        if (key) process.env[key.trim()] = value.trim();
       }
     });
   }
@@ -136,9 +137,9 @@ async function runTests() {
 
       // Verify ordering is Exact Match -> Single Wildcard (*) -> Global Wildcard (>)
       const isSortedCorrectly =
-        sorted[0].subjectPattern === exactPattern &&
-        sorted[1].subjectPattern === starPattern &&
-        sorted[2].subjectPattern === greaterPattern;
+        sorted[0]?.subjectPattern === exactPattern &&
+        sorted[1]?.subjectPattern === starPattern &&
+        sorted[2]?.subjectPattern === greaterPattern;
 
       return isSortedCorrectly;
     },

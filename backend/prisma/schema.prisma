@@ -7,6 +7,16 @@ generator client {
   provider = "prisma-client-js"
 }
 
+/// Application-level enum for DLQ event lifecycle state.
+/// Matching values are enforced both here and in the Supabase CHECK constraint
+/// (setup.sql) so both the Express backend and Next.js dashboard share the same
+/// status vocabulary.
+enum DlqStatus {
+  PENDING
+  REPLAYED
+  DISMISSED
+}
+
 model Schema {
   id             String   @id @default(uuid())
   subjectPattern String   @unique
@@ -18,7 +28,7 @@ model Schema {
 }
 
 model DlqEvent {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   stream        String
   subject       String
   consumerGroup String
@@ -26,9 +36,12 @@ model DlqEvent {
   headers       Json?
   errorReason   String
   numDelivered  Int
-  status        String   // PENDING, REPLAYED, DISMISSED
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  status        DlqStatus @default(PENDING) // typed enum replaces bare String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])          // query-performance index for status filter
+  @@index([createdAt(sort: Desc)]) // supports date-range pagination
 }
 
 model ConsumerSimulatorConfig {
@@ -42,4 +55,6 @@ model ConsumerSimulatorConfig {
   active          Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([active])          // supports active-only queries in stats polling
 }

@@ -1,10 +1,11 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { stopSimulator } from "@/lib/simulator";
+
 import { initNats } from "@/lib/nats";
+import { stopSimulator } from "@/lib/simulator";
 
 export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse
+  res: NextApiResponse,
 ) {
   const { durableName } = req.query;
   const name = String(durableName);
@@ -18,8 +19,11 @@ export default async function handler(
     await initNats();
     await stopSimulator(name);
     return res.status(200).json({ success: true });
-  } catch (err: any) {
-    console.error(`Error in /api/simulator/[durableName]/stop for ${name}:`, err);
-    return res.status(500).json({ error: err.message });
+  } catch (err: unknown) {
+    console.error(
+      `Error in /api/simulator/[durableName]/stop for ${name}:`,
+      err,
+    );
+    return res.status(500).json({ error: (err as Error).message });
   }
 }

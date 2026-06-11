@@ -7,6 +7,7 @@ import {
   RetentionPolicy,
   DiscardPolicy,
   AckPolicy,
+  StreamInfo,
 } from "nats";
 
 let nc: NatsConnection | null = null;
@@ -17,11 +18,15 @@ export const codec = JSONCodec();
 
 // Dev singleton hot-reload prevention
 if (process.env.NODE_ENV === "development") {
-  const g = global as any;
+  const g = global as unknown as {
+    _natsNc?: NatsConnection;
+    _natsJs?: JetStreamClient;
+    _natsJsm?: JetStreamManager;
+  };
   if (g._natsNc) {
     nc = g._natsNc;
-    js = g._natsJs;
-    jsm = g._natsJsm;
+    js = g._natsJs ?? null;
+    jsm = g._natsJsm ?? null;
   }
 }
 
@@ -33,10 +38,15 @@ export async function initNats(): Promise<NatsConnection> {
     nc = await connect({ servers: url });
     js = nc.jetstream();
     jsm = await nc.jetstreamManager();
+    /* eslint-disable-next-line no-console */
     console.log(`Connected to NATS at ${url}`);
 
     if (process.env.NODE_ENV === "development") {
-      const g = global as any;
+      const g = global as unknown as {
+        _natsNc?: NatsConnection;
+        _natsJs?: JetStreamClient;
+        _natsJsm?: JetStreamManager;
+      };
       g._natsNc = nc;
       g._natsJs = js;
       g._natsJsm = jsm;
@@ -55,7 +65,9 @@ export async function initNats(): Promise<NatsConnection> {
 export function getNatsConnection(): NatsConnection {
   const connection =
     nc ||
-    (process.env.NODE_ENV === "development" ? (global as any)._natsNc : null);
+    (process.env.NODE_ENV === "development"
+      ? (global as unknown as { _natsNc?: NatsConnection })._natsNc
+      : null);
   if (!connection) throw new Error("NATS is not initialized");
   return connection;
 }
@@ -63,7 +75,9 @@ export function getNatsConnection(): NatsConnection {
 export function getJetStream(): JetStreamClient {
   const jetstream =
     js ||
-    (process.env.NODE_ENV === "development" ? (global as any)._natsJs : null);
+    (process.env.NODE_ENV === "development"
+      ? (global as unknown as { _natsJs?: JetStreamClient })._natsJs
+      : null);
   if (!jetstream) throw new Error("JetStream is not initialized");
   return jetstream;
 }
@@ -71,7 +85,9 @@ export function getJetStream(): JetStreamClient {
 export function getJetStreamManager(): JetStreamManager {
   const manager =
     jsm ||
-    (process.env.NODE_ENV === "development" ? (global as any)._natsJsm : null);
+    (process.env.NODE_ENV === "development"
+      ? (global as unknown as { _natsJsm?: JetStreamManager })._natsJsm
+      : null);
   if (!manager) throw new Error("JetStreamManager is not initialized");
   return manager;
 }
@@ -81,7 +97,7 @@ async function ensureDefaultStream() {
   try {
     const streams = await manager.streams.list().next();
     const hasDefault = streams.some(
-      (s: any) => s.config.name === "DEMO_STREAM",
+      (s: StreamInfo) => s.config.name === "DEMO_STREAM",
     );
     if (!hasDefault) {
       await manager.streams.add({
@@ -91,6 +107,7 @@ async function ensureDefaultStream() {
         max_msgs: 10000,
         discard: DiscardPolicy.Old,
       });
+      /* eslint-disable-next-line no-console */
       console.log(
         "Created default NATS stream: DEMO_STREAM targeting 'events.>'",
       );
@@ -112,7 +129,7 @@ export async function getStreamInfo(name: string) {
   try {
     const info = await manager.streams.info(name);
     return info;
-  } catch (err) {
+  } catch {
     return null;
   }
 }
@@ -142,7 +159,7 @@ export async function getConsumerInfo(stream: string, consumer: string) {
   const manager = getJetStreamManager();
   try {
     return await manager.consumers.info(stream, consumer);
-  } catch (err) {
+  } catch {
     return null;
   }
 }
@@ -173,7 +190,7 @@ export async function getStreamMessage(stream: string, seq: number) {
     if (!msg) return null;
 
     // Decode data payload
-    let decodedData: any = null;
+    let decodedData: unknown = null;
     try {
       decodedData = codec.decode(msg.data);
     } catch {
@@ -195,7 +212,7 @@ export async function getStreamMessage(stream: string, seq: number) {
       time: msg.time,
       headers,
     };
-  } catch (err) {
+  } catch {
     return null;
   }
 }

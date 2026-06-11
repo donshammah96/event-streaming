@@ -1,7 +1,8 @@
-import type { NextApiRequest, NextApiResponse } from "next";
 import { JetStreamPublishOptions, headers as natsHeaders } from "nats";
+import type { NextApiRequest, NextApiResponse } from "next";
+
 import { initNats, getJetStream, codec } from "@/lib/nats";
-import { supabase } from "@/lib/supabaseClient";
+import { supabaseServer } from "@/lib/supabaseClient";
 
 export default async function handler(
   req: NextApiRequest,
@@ -21,7 +22,7 @@ export default async function handler(
     await initNats();
 
     // Fetch original event from Supabase
-    const { data: event, error: fetchErr } = await supabase
+    const { data: event, error: fetchErr } = await supabaseServer
       .from("DlqEvent")
       .select("*")
       .eq("id", id)
@@ -52,7 +53,7 @@ export default async function handler(
     const pa = await js.publish(subject, codec.encode(event.payload), opt);
 
     // Update status in Supabase to REPLAYED
-    const { data: updated, error: updateErr } = await supabase
+    const { data: updated, error: updateErr } = await supabaseServer
       .from("DlqEvent")
       .update({
         status: "REPLAYED",

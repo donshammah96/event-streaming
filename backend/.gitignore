@@ -1,0 +1,17 @@
+# Compiled output
+dist/
+
+# Environment variables — NEVER commit real credentials
+.env
+.env.local
+.env.*.local
+
+# Node modules
+node_modules/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# OS artifacts
+.DS_Store
+Thumbs.db

@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "@/lib/supabaseClient";
+
+import { supabaseServer } from "@/lib/supabaseClient";
 
 export default async function handler(
   req: NextApiRequest,
@@ -7,7 +8,7 @@ export default async function handler(
 ) {
   try {
     if (req.method === "GET") {
-      const { data: configs, error } = await supabase
+      const { data: configs, error } = await supabaseServer
         .from("ConsumerSimulatorConfig")
         .select("*")
         .order("createdAt", { ascending: false });
@@ -38,7 +39,7 @@ export default async function handler(
       }
 
       // Check if durableName already exists
-      const { data: existing } = await supabase
+      const { data: existing } = await supabaseServer
         .from("ConsumerSimulatorConfig")
         .select("id")
         .eq("durableName", durableName)
@@ -50,7 +51,7 @@ export default async function handler(
         });
       }
 
-      const { data: config, error } = await supabase
+      const { data: config, error } = await supabaseServer
         .from("ConsumerSimulatorConfig")
         .insert({
           stream,

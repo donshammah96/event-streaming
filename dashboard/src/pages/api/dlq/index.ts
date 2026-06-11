@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "@/lib/supabaseClient";
+
+import { supabaseServer } from "@/lib/supabaseClient";
 
 export default async function handler(
   req: NextApiRequest,
@@ -13,7 +14,7 @@ export default async function handler(
   const { status } = req.query;
 
   try {
-    let query = supabase
+    let query = supabaseServer
       .from("DlqEvent")
       .select("*")
       .order("createdAt", { ascending: false });

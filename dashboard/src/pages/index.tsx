@@ -1,3 +1,4 @@
+import { createClient } from "@supabase/supabase-js";
 import React, { useState, useEffect, useRef } from "react";
 
 // Types matching Backend Models
@@ -77,18 +78,25 @@ interface WsStatsMessage {
   };
 }
 
-interface WsLogMessage {
-  type: "LOG";
-  data: ConsoleLog;
-}
-
-type WsMessage = WsStatsMessage | WsLogMessage;
-
 const BACKEND_URL = "/api";
-const WS_URL =
-  typeof window !== "undefined"
-    ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/ws`
-    : "";
+
+/**
+ * Public Supabase client — uses the anon key, scoped to Realtime subscriptions only.
+ * The service-role key MUST NOT be used here (browser-side code).
+ */
+const supabasePublic =
+  typeof window !== "undefined" &&
+  process.env.NEXT_PUBLIC_SUPABASE_URL &&
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    ? createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL,
+        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+        { auth: { persistSession: false } },
+      )
+    : null;
+
+/** Token required by /api/dlq/purge to authorize a destructive table wipe. */
+const DLQ_PURGE_CONFIRM_TOKEN = "CONFIRM_PURGE_ALL";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<
@@ -182,6 +190,7 @@ export default function App() {
 
   // Fetch lists for views
   const fetchInitialData = async () => {
+    await Promise.resolve();
     setIsLoading(true);
     try {
       const [streamsRes, schemasRes, simsRes, dlqRes] = await Promise.all([
@@ -210,73 +219,96 @@ export default function App() {
     }
   };
 
-  // WebSocket connection & statistics setup
+  // ── Bootstrap initializer ──────────────────────────────────────────────────
+  // Calls /api/ws once on mount to ensure NATS, schema cache, and simulator
+  // workers are all warmed up before the first REST call.
   useEffect(() => {
-    let ws: WebSocket;
+    fetch("/api/ws").catch((err) =>
+      console.warn("[bootstrap] /api/ws init warning:", err),
+    );
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchInitialData();
+  }, []);
+
+  // ── Stats polling via REST ─────────────────────────────────────────────────
+  // Polls /api/stats every 3 seconds. Uses exponential backoff (up to 30 s)
+  // on consecutive failures to avoid hammering the serverless runtime.
+  useEffect(() => {
     let active = true;
+    let retryDelay = 3_000;
+    let timerId: ReturnType<typeof setTimeout>;
 
-    async function initWs() {
+    async function pollStats() {
       try {
-        // Trigger Next.js API route to boot WebSocket gateway
-        await fetch("/api/ws");
+        const res = await fetch(`${BACKEND_URL}/stats`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as WsStatsMessage["data"] & {
+          timestamp: string;
+        };
+        setStats({
+          streams: data.streams ?? [],
+          activeSimulators: data.activeSimulators ?? 0,
+          pendingDlq: data.pendingDlq ?? 0,
+          registeredSchemas: data.registeredSchemas ?? 0,
+        });
+        if (Array.isArray(data.streams)) setStreams(data.streams);
+        retryDelay = 3_000; // reset backoff on success
       } catch (err) {
-        console.warn("WebSocket bootstrapping check failed:", err);
-      }
-
-      if (!active) return;
-      connectWs();
-    }
-
-    function connectWs() {
-      if (!WS_URL) return;
-      ws = new WebSocket(WS_URL);
-
-      ws.onopen = () => {
-        setWsConnected(true);
-        console.log("WebSocket connected to gateway");
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          if (typeof event.data !== "string") return;
-          const payload = JSON.parse(event.data) as WsMessage;
-
-          if (payload.type === "STATS") {
-            setStats(payload.data);
-            if (payload.data.streams) {
-              setStreams(payload.data.streams);
-            }
-          } else if (payload.type === "LOG") {
-            setLogs((prev) => {
-              const updated = [...prev, payload.data];
-              return updated.slice(-150); // Cap log size at 150 items
-            });
-          }
-        } catch (err) {
-          console.warn("WebSocket parse error:", err);
+        console.warn("[stats poll] Error:", err);
+        retryDelay = Math.min(retryDelay * 2, 30_000); // exponential backoff
+      } finally {
+        if (active) {
+          timerId = setTimeout(() => void pollStats(), retryDelay);
         }
-      };
-
-      ws.onclose = () => {
-        setWsConnected(false);
-        console.log("WebSocket disconnected from gateway. Reconnecting...");
-        setTimeout(() => {
-          if (active) connectWs();
-        }, 3000); // Auto reconnect in 3s
-      };
-
-      ws.onerror = (err) => {
-        console.error("WebSocket error:", err);
-        ws.close();
-      };
+      }
     }
 
-    void initWs();
-    void Promise.resolve().then(() => fetchInitialData());
-
+    void pollStats();
     return () => {
       active = false;
-      if (ws) ws.close();
+      clearTimeout(timerId);
+    };
+  }, []);
+
+  // ── Supabase Realtime — SimulatorLog subscription ─────────────────────────
+  // Subscribes to INSERT events on the SimulatorLog table.
+  // Falls back silently if Supabase Realtime is unavailable.
+  useEffect(() => {
+    if (!supabasePublic) return;
+
+    interface SimulatorLogRow {
+      durableName: string;
+      timestamp: string;
+      text: string;
+      type: "info" | "success" | "warn" | "error";
+    }
+
+    const channel = supabasePublic
+      .channel("realtime:public:SimulatorLog")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "SimulatorLog" },
+        (payload: { new: SimulatorLogRow }) => {
+          const row = payload.new;
+          const logEntry: ConsoleLog = {
+            durableName: row.durableName,
+            timestamp: row.timestamp,
+            text: row.text,
+            type: row.type,
+          };
+          setLogs((prev) => {
+            // Cap client-side log buffer at 150 entries; server prunes at 1000
+            const updated = [...prev, logEntry];
+            return updated.slice(-150);
+          });
+        },
+      )
+      .subscribe((status) => {
+        setWsConnected(status === "SUBSCRIBED");
+      });
+
+    return () => {
+      void supabasePublic.removeChannel(channel);
     };
   }, []);
 
@@ -603,14 +635,22 @@ export default function App() {
   const handlePurgeDlq = async () => {
     if (
       !confirm(
-        "Are you sure you want to purge all DLQ messages? This will wipe the DLQ database table.",
+        "Are you sure you want to purge ALL DLQ messages? This is irreversible and will wipe the entire DlqEvent table.",
       )
     )
       return;
     try {
-      const res = await fetch(`${BACKEND_URL}/dlq/purge`, { method: "POST" });
+      const res = await fetch(`${BACKEND_URL}/dlq/purge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Server requires this token to prevent CSRF-triggered table wipes.
+        body: JSON.stringify({ confirmToken: DLQ_PURGE_CONFIRM_TOKEN }),
+      });
       if (res.ok) {
         await refreshTab("dlq");
+      } else {
+        const err = (await res.json()) as { error: string };
+        alert(`Purge failed: ${err.error}`);
       }
     } catch (err) {
       console.error(err);
@@ -737,7 +777,7 @@ export default function App() {
             className={`status-dot ${wsConnected ? "connected" : "disconnected"}`}
           />
           <span>
-            {wsConnected ? "System Status: Online" : "System Status: Offline"}
+            {wsConnected ? "Realtime: Connected" : "Realtime: Connecting..."}
           </span>
         </div>
       </aside>

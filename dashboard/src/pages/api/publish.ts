@@ -1,5 +1,6 @@
+import { headers as natsHeaders, PublishOptions } from "nats";
 import type { NextApiRequest, NextApiResponse } from "next";
-import { headers as natsHeaders } from "nats";
+
 import { initNats, getJetStream, codec } from "@/lib/nats";
 import { ensureSchemaCache, validateMessage } from "@/lib/schema";
 
@@ -36,7 +37,7 @@ export default async function handler(
     const js = getJetStream();
 
     // Construct NATS headers
-    const opt: any = {};
+    const opt: Partial<PublishOptions> = {};
     if (headers && typeof headers === "object") {
       const nHeaders = natsHeaders();
       for (const [key, value] of Object.entries(headers)) {

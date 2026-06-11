@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
+
 import { initNats, getStreamInfo, getStreamMessage } from "@/lib/nats";
 
 export default async function handler(

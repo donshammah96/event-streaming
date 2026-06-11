@@ -72,7 +72,7 @@ Follow these steps to spin up NATS JetStream and run the application locally:
 
 ### Step 1: Start NATS Container
 
-In the workspace root directory, start the NATS JetStream container. Note that NATS has been mapped to host port **4422** to prevent conflicts with reserved port exclusions on Windows hosts:
+In the workspace root directory, start the NATS JetStream container. Note that NATS has been mapped to host port **4222** (and monitoring port **8722** to prevent conflicts with reserved port exclusions on Windows hosts):
 
 ```bash
 docker-compose up -d
@@ -85,7 +85,7 @@ Create a `dashboard/.env.local` file in the dashboard directory:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-supabase-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-anon-key
-NATS_URL=nats://localhost:4422
+NATS_URL=nats://localhost:4222
 ```
 
 ### Step 3: Run the Development Server

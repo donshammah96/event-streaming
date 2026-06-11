@@ -1,0 +1,6 @@
+# Vercel deployment — ignore these directories/files
+backend/
+.github/
+docker-compose.yml
+*.md
+!dashboard/README.md

@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "@/lib/supabaseClient";
+
 import { reloadSchemaCache, validateSchemaDefinition } from "@/lib/schema";
+import { supabaseServer } from "@/lib/supabaseClient";
 
 export default async function handler(
   req: NextApiRequest,
@@ -8,7 +9,7 @@ export default async function handler(
 ) {
   try {
     if (req.method === "GET") {
-      const { data: schemas, error } = await supabase
+      const { data: schemas, error } = await supabaseServer
         .from("Schema")
         .select("*")
         .order("createdAt", { ascending: false });
@@ -34,7 +35,7 @@ export default async function handler(
       }
 
       // Check if schema already exists (equivalent to Prisma unique constraint check)
-      const { data: existing } = await supabase
+      const { data: existing } = await supabaseServer
         .from("Schema")
         .select("id")
         .eq("subjectPattern", subjectPattern)
@@ -46,7 +47,7 @@ export default async function handler(
         });
       }
 
-      const { data: newSchema, error } = await supabase
+      const { data: newSchema, error } = await supabaseServer
         .from("Schema")
         .insert({
           subjectPattern,

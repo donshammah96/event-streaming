@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "@/lib/supabaseClient";
+
 import { reloadSchemaCache, validateSchemaDefinition } from "@/lib/schema";
+import { supabaseServer } from "@/lib/supabaseClient";
 
 export default async function handler(
   req: NextApiRequest,
@@ -28,7 +29,7 @@ export default async function handler(
       }
 
       // Fetch current version
-      const { data: current, error: fetchErr } = await supabase
+      const { data: current, error: fetchErr } = await supabaseServer
         .from("Schema")
         .select("*")
         .eq("id", id)
@@ -38,7 +39,7 @@ export default async function handler(
         return res.status(404).json({ error: "Schema not found" });
       }
 
-      const { data: updated, error: updateErr } = await supabase
+      const { data: updated, error: updateErr } = await supabaseServer
         .from("Schema")
         .update({
           schema,
@@ -57,7 +58,10 @@ export default async function handler(
 
       return res.status(200).json(updated);
     } else if (req.method === "DELETE") {
-      const { error } = await supabase.from("Schema").delete().eq("id", id);
+      const { error } = await supabaseServer
+        .from("Schema")
+        .delete()
+        .eq("id", id);
       if (error) throw error;
 
       // Reload cache

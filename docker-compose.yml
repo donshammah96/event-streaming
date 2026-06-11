@@ -1,16 +1,24 @@
 
 services:
   nats:
-    image: nats:latest
+    image: nats:2.10-alpine  # pinned — unpinned :latest causes non-reproducible builds
     container_name: event-streaming-nats
     ports:
-      - "4422:4222"
-      - "8222:8222"
+      - "4222:4222"  # Host 4222 → Container 4222 (avoids Windows port reservation range)
+      - "8722:8222"  # NATS monitoring / healthz endpoint (avoids Windows port reservation range)
     command: "-js -m 8222"
     restart: unless-stopped
+    networks:
+      - event-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine  # pinned — consistent with Supabase's pg16 default
     container_name: event-streaming-postgres
     environment:
       POSTGRES_USER: postgres
@@ -21,6 +29,18 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    networks:
+      - event-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d event_streaming"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  event-net:
+    driver: bridge
 
 volumes:
   postgres_data:
