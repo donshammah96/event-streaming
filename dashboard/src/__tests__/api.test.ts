@@ -2,6 +2,13 @@
 import fs from "fs";
 import path from "path";
 
+import ws from "ws";
+
+// Shim global WebSocket for Node.js < 22 support in Supabase Realtime client
+if (typeof global.WebSocket === "undefined") {
+  (global as unknown as { WebSocket: unknown }).WebSocket = ws;
+}
+
 // Load environment variables from .env.local manually
 try {
   const envPath = path.resolve(process.cwd(), ".env.local");
