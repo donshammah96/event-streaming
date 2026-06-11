@@ -80,20 +80,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: [typecheck, lint]
 
-    services:
-      nats:
-        image: nats:2.10-alpine
-        ports:
-          - 4422:4222
-        options: >-
-          --health-cmd "wget -q --spider http://localhost:8222/healthz || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Start NATS JetStream
+        run: docker run -d --name nats -p 4422:4222 -p 8222:8222 nats:2.10-alpine -js -m 8222
+
+      - name: Wait for NATS health
+        run: |
+          for i in {1..10}; do
+            wget -q --spider http://localhost:8222/healthz && break || sleep 2
+          done
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
