@@ -22,14 +22,14 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 10
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: 'dashboard/pnpm-lock.yaml'
+          cache: "pnpm"
+          cache-dependency-path: "dashboard/pnpm-lock.yaml"
 
       - name: Install Dependencies
         working-directory: ./dashboard
@@ -54,14 +54,14 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 10
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: 'dashboard/pnpm-lock.yaml'
+          cache: "pnpm"
+          cache-dependency-path: "dashboard/pnpm-lock.yaml"
 
       - name: Install Dependencies
         working-directory: ./dashboard
@@ -98,14 +98,14 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 10
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: 'dashboard/pnpm-lock.yaml'
+          cache: "pnpm"
+          cache-dependency-path: "dashboard/pnpm-lock.yaml"
 
       - name: Install Dependencies
         working-directory: ./dashboard
